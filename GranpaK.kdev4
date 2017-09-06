@@ -1,0 +1,4 @@
+[Project]
+Name=GranpaK
+Manager=KDevCMakeManager
+VersionControl=kdevgit
