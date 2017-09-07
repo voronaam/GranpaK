@@ -1,0 +1,24 @@
+#!/bin/sh
+
+VERSION=666.development
+
+if test -f version
+then
+	GRANPAK_VERSION=$(cat version | awk -F'-' '{print $1}')
+	GRANPAK_RELEASE=$(cat version | awk -F'-' '{print $2}')
+else
+	DATE=$(date +%Y%m%d)
+	GIT_COMMIT=$(git log --pretty=format:'%h' -n 1)
+	GRANPAK_VERSION=$VERSION
+	# For custom package builds, replace "0" with "counter.your_name",
+	# where counter starts at 1 and increments for successive versions.
+	# This ensures that the package manager will select your custom
+	# package over the standard release.
+	GRANPAK_BUILD=0
+	GRANPAK_RELEASE=$GRANPAK_BUILD.$DATE.$GIT_COMMIT
+fi
+
+echo "$GRANPAK_VERSION-$GRANPAK_RELEASE"
+mkdir -p build
+echo "$GRANPAK_VERSION" > build/GRANPAK-VERSION-FILE
+echo "$GRANPAK_RELEASE" > build/GRANPAK-RELEASE-FILE
