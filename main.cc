@@ -2,11 +2,23 @@
 #include "core/reactor.hh"
 #include "core/future-util.hh"
 #include "util/log.hh"
+#include <core/sharded.hh>
 
 #include <iostream>
 #include <stdexcept>
 
+#include "database.hh"
+
 seastar::logger startlog("init");
+
+static seastar::future<> disk_sanity(seastar::sstring path) {
+    return check_direct_io_support(path).then([] {
+        return seastar::make_ready_future<>();
+    }).handle_exception([path](auto ep) {
+        startlog.error("Could not access {}: {}", path, ep);
+        return seastar::make_exception_future<>(ep);
+    });
+};
 
 static void tcp_syncookies_sanity() {
     try {
@@ -21,6 +33,10 @@ static void tcp_syncookies_sanity() {
     } catch (const std::system_error& e) {
             startlog.warn("Unable to check if net.ipv4.tcp_syncookies is set {}", e);
     }
+}
+
+void init_storage_service(seastar::sharded<database>& db) {
+    // service::init_storage_service(db).get();
 }
 
 seastar::future<> handle_connection(seastar::connected_socket s,
@@ -64,13 +80,20 @@ seastar::future<> service_loop() {
 
 int main(int argc, char** argv) {
     seastar::app_template app;
+    seastar::sharded<database> db;
     try {
-        app.run(argc, argv, [] {
+        app.run(argc, argv, [&db] {
             startlog.info("Starting GranpaK server...");
             tcp_syncookies_sanity();
-            return seastar::parallel_for_each(boost::irange<unsigned>(0, seastar::smp::count),
-                    [] (unsigned c) {
-                return seastar::smp::submit_to(c, service_loop);
+            init_storage_service(db);
+            return disk_sanity(".").then([] {
+                return seastar::parallel_for_each(boost::irange<unsigned>(0, seastar::smp::count),
+                        [] (unsigned c) {
+                    return seastar::smp::submit_to(c, service_loop);
+                });
+            }).handle_exception([](auto ep) {
+                startlog.error("Terminating due to a severe error", ep);
+                return seastar::make_ready_future<>();
             });
         });
     } catch(...) {
