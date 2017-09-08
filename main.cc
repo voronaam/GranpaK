@@ -1,8 +1,27 @@
 #include "core/app-template.hh"
 #include "core/reactor.hh"
 #include "core/future-util.hh"
+#include "util/log.hh"
+
 #include <iostream>
 #include <stdexcept>
+
+seastar::logger startlog("init");
+
+static void tcp_syncookies_sanity() {
+    try {
+        auto f = seastar::file_desc::open("/proc/sys/net/ipv4/tcp_syncookies", O_RDONLY | O_CLOEXEC);
+        char buf[128] = {};
+        f.read(buf, 128);
+        if (seastar::sstring(buf) == "0\n") {
+            startlog.warn("sysctl entry net.ipv4.tcp_syncookies is set to 0.\n"
+                          "For better performance, set following parameter on sysctl is strongly recommended:\n"
+                          "net.ipv4.tcp_syncookies=1");
+        }
+    } catch (const std::system_error& e) {
+            startlog.warn("Unable to check if net.ipv4.tcp_syncookies is set {}", e);
+    }
+}
 
 seastar::future<> handle_connection(seastar::connected_socket s,
                                     seastar::socket_address a) {
@@ -47,6 +66,8 @@ int main(int argc, char** argv) {
     seastar::app_template app;
     try {
         app.run(argc, argv, [] {
+            startlog.info("Starting GranpaK server...");
+            tcp_syncookies_sanity();
             return seastar::parallel_for_each(boost::irange<unsigned>(0, seastar::smp::count),
                     [] (unsigned c) {
                 return seastar::smp::submit_to(c, service_loop);
