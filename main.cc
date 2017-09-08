@@ -3,6 +3,7 @@
 #include "core/future-util.hh"
 #include "util/log.hh"
 #include <core/sharded.hh>
+#include "core/fstream.hh"
 
 #include <iostream>
 #include <stdexcept>
@@ -36,7 +37,34 @@ static void tcp_syncookies_sanity() {
 }
 
 void init_storage_service(seastar::sharded<database>& db) {
-    // service::init_storage_service(db).get();
+    
+}
+
+/*
+ * dead code
+ 
+                         return seastar::open_file_dma(name, seastar::open_flags::wo | seastar::open_flags::create).then([buf = std::move(buf)] (auto f) {
+                            auto fout = seastar::make_file_output_stream(std::move(f));
+                            return fout.write(buf).then([&fout] {
+                                fout.flush();
+                            }).then([&fout] {
+                                fout.close();
+                            });
+                        / * echo
+                        return out.write(std::move(buf)).then([&out] {
+                            return out.flush();
+                        * /
+                        }).then([] {
+                            return seastar::stop_iteration::no;
+                        });
+
+*/
+
+void test() {
+    auto name = seastar::sprint("dump-%d", seastar::engine().cpu_id());
+    auto file_future = seastar::open_file_dma(name, seastar::open_flags::wo | seastar::open_flags::create).then([] (auto f) {
+    });
+
 }
 
 seastar::future<> handle_connection(seastar::connected_socket s,
@@ -48,7 +76,22 @@ seastar::future<> handle_connection(seastar::connected_socket s,
             return seastar::repeat([&out, &in] {
                 return in.read().then([&out] (auto buf) {
                     if (buf) {
-                        return out.write(std::move(buf)).then([&out] {
+                        return seastar::do_with(std::move(buf), [&out] (auto &buf) {
+                            auto name = seastar::sprint("dump-%d", seastar::engine().cpu_id());
+                            return seastar::open_file_dma(name, seastar::open_flags::wo | seastar::open_flags::create).then([&buf, &out] (auto f) {
+                                auto fout = seastar::make_file_output_stream(std::move(f));
+                                return seastar::do_with(std::move(fout), [&buf, &out] (auto& fout) {
+                                    return out.write(buf.share()).then([&] {
+                                        return fout.write(buf.get(), buf.size());
+                                    }).then([&out] {
+                                        return out.flush();
+                                    }).then([&] {
+                                        return fout.flush();
+                                    });
+                                    // return out.write(std::move(buf));
+                                });
+                            });
+                        }).then([&out] {
                             return out.flush();
                         }).then([] {
                             return seastar::stop_iteration::no;
@@ -65,6 +108,7 @@ seastar::future<> handle_connection(seastar::connected_socket s,
 }
 
 seastar::future<> service_loop() {
+    startlog.info("Starting on CPU {}", seastar::engine().cpu_id());
     seastar::listen_options lo;
     lo.reuse_address = true;
     return seastar::do_with(seastar::listen(seastar::make_ipv4_address({1234}), lo),
@@ -85,14 +129,15 @@ int main(int argc, char** argv) {
         app.run(argc, argv, [&db] {
             startlog.info("Starting GranpaK server...");
             tcp_syncookies_sanity();
-            init_storage_service(db);
-            return disk_sanity(".").then([] {
+            return disk_sanity(".").then([&db] {
+                init_storage_service(db);
+            }).then([] {
                 return seastar::parallel_for_each(boost::irange<unsigned>(0, seastar::smp::count),
                         [] (unsigned c) {
                     return seastar::smp::submit_to(c, service_loop);
                 });
             }).handle_exception([](auto ep) {
-                startlog.error("Terminating due to a severe error", ep);
+                startlog.error("Terminating due to a severe error: {}", ep);
                 return seastar::make_ready_future<>();
             });
         });
