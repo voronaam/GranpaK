@@ -215,7 +215,7 @@ defines = []
 extra_cxxflags = {}
 
 deps = {
-    'granpak': ['main.cc'],
+    'granpak': ['database.cc', 'main.cc'],
 }
 
 warnings = [

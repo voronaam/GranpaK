@@ -36,29 +36,16 @@ static void tcp_syncookies_sanity() {
     }
 }
 
-void init_storage_service(seastar::sharded<database>& db) {
-    
+seastar::future<> init_storage_service(seastar::sharded<database>& db) {
+    return db.start();
+    /*
+    auto name = seastar::sprint("newdump-%d", seastar::engine().cpu_id());
+    return seastar::open_file_dma(name, seastar::open_flags::wo | seastar::open_flags::create).then([&] (auto f) {
+        auto fout = seastar::make_file_output_stream(std::move(f));
+        db.set_writer(std::move(fout));
+    };
+    */
 }
-
-/*
- * dead code
- 
-                         return seastar::open_file_dma(name, seastar::open_flags::wo | seastar::open_flags::create).then([buf = std::move(buf)] (auto f) {
-                            auto fout = seastar::make_file_output_stream(std::move(f));
-                            return fout.write(buf).then([&fout] {
-                                fout.flush();
-                            }).then([&fout] {
-                                fout.close();
-                            });
-                        / * echo
-                        return out.write(std::move(buf)).then([&out] {
-                            return out.flush();
-                        * /
-                        }).then([] {
-                            return seastar::stop_iteration::no;
-                        });
-
-*/
 
 void test() {
     auto name = seastar::sprint("dump-%d", seastar::engine().cpu_id());
@@ -88,7 +75,6 @@ seastar::future<> handle_connection(seastar::connected_socket s,
                                     }).then([&] {
                                         return fout.flush();
                                     });
-                                    // return out.write(std::move(buf));
                                 });
                             });
                         }).then([&out] {
@@ -130,7 +116,7 @@ int main(int argc, char** argv) {
             startlog.info("Starting GranpaK server...");
             tcp_syncookies_sanity();
             return disk_sanity(".").then([&db] {
-                init_storage_service(db);
+                return init_storage_service(db);
             }).then([] {
                 return seastar::parallel_for_each(boost::irange<unsigned>(0, seastar::smp::count),
                         [] (unsigned c) {
