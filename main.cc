@@ -3,9 +3,10 @@
 #include "core/future-util.hh"
 #include "util/log.hh"
 #include <core/sharded.hh>
-#include "core/fstream.hh"
+// #include "core/fstream.hh"
 
 #include <iostream>
+#include <fstream>
 #include <stdexcept>
 
 #include "database.hh"
@@ -54,6 +55,13 @@ void test() {
 
 }
 
+void dump(const seastar::temporary_buffer<char>& buf) {
+    std::ofstream dump;
+    dump.open("dump.out", std::ios_base::app);
+    dump.write(buf.get(), buf.size());
+    dump.close();
+};
+
 seastar::future<> handle_connection(seastar::connected_socket s,
                                     seastar::socket_address a) {
     auto out = s.output();
@@ -63,28 +71,10 @@ seastar::future<> handle_connection(seastar::connected_socket s,
             return seastar::repeat([&out, &in] {
                 return in.read().then([&out] (auto buf) {
                     if (buf) {
-                        return seastar::do_with(std::move(buf), [&out] (auto &buf) {
-                            auto name = seastar::sprint("dump-%d", seastar::engine().cpu_id());
-                            return seastar::open_file_dma(name, seastar::open_flags::wo | seastar::open_flags::create).then([&buf, &out] (auto f) {
-                                auto fout = seastar::make_file_output_stream(std::move(f));
-                                return seastar::do_with(std::move(fout), [&buf, &out] (auto& fout) {
-                                    return out.write(buf.share()).then([&] {
-                                        return fout.write(buf.get(), buf.size());
-                                    }).then([&out] {
-                                        return out.flush();
-                                    }).then([&] {
-                                        return fout.flush();
-                                    });
-                                });
-                            });
-                        }).then([&out] {
-                            return out.flush();
-                        }).then([] {
-                            return seastar::stop_iteration::no;
-                        });
+                        dump(buf);
+                        return seastar::make_ready_future<seastar::stop_iteration>(seastar::stop_iteration::no);
                     } else {
-                        return seastar::make_ready_future<seastar::stop_iteration>(
-                            seastar::stop_iteration::yes);
+                        return seastar::make_ready_future<seastar::stop_iteration>(seastar::stop_iteration::yes);
                     }
                 });
             }).then([&out] {
